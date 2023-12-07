@@ -1,0 +1,1716 @@
+---
+title: "Everything About Regression in R"
+author: "Brian Bruxvoort"
+date: "2023-12-07"
+output: html_document
+---
+
+# Start
+
+First determine what your response variable will be: Numerical or Categorical
+If numerical run linear or multiple regression depending on number of explanatory variables.
+If categorical run a logistic regression.
+Don't forget to recode any categorical explanatory variables as indicator variables like 0's and 1's.
+
+# Load necssary packages, libraries, and data sets
+## Libraries
+```{r}
+library(dplyr)
+library(car)
+library(tidyverse)
+library(leaps)
+library(PropCIs) # For prop test
+library(mcprofile)
+library(nnet)
+library(MASS)
+library(vcd)
+#library(glmulti)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(Metrics)
+library(readxl)
+library(caret)
+```
+
+## Data
+```{r}
+murder<-read.csv(file="MURDERRATE.csv", header=TRUE, sep=",") # simple linear regression
+hitters <- read.csv("Hitters.csv") # Multiple Linear Regression
+hitters <- hitters %>% dplyr::select(-c(AtBat, Hits, HmRun, Runs, RBI, Walks, League, Division, PutOuts, Assists, Errors, NewLeague)) %>% drop_na(Salary) # Clean data
+Gator<-read.csv("ALLIGATOR.csv", header=TRUE, sep=",") # Polynomial Models
+frog<-read.csv("Bullfrog.csv", header=TRUE, sep=",") # Simple Logistic
+ford<-read.csv("FordExplorer_RS.csv", header=TRUE, sep=",") # Multiple Logistic
+chemical<-read.csv("MVPExer13_6.csv", header=TRUE, sep=",") # GLM
+placekick <- read.csv("Placekick.csv") # Categorical Analysis
+tomato <- read.csv("TomatoVirus.csv")
+diet <- read.csv("Fiber.csv")
+wheat <- read.csv("wheat.csv")
+stoplight <- read.csv("Stoplight.csv")
+crab <- read.table("Horseshoe.txt", header = TRUE)
+```
+
+# Simple Linear Regression
+```{r}
+#run basic SLR
+murderSLR<-lm(murder.rate~weapons, data=murder)
+summary(murderSLR)
+```
+
+```{r}
+#make scatterplot
+plot(murder$weapons, murder$murder.rate, pch=20)
+
+#add regression line to scatterplot
+abline(murderSLR)
+```
+
+```{r}
+#confidence intervals for coefficients
+confint(murderSLR, level=0.95)
+```
+
+```{r}
+#Create ANOVA table
+anova(murderSLR)
+```
+
+```{r}
+#Create another ANOVA table
+Anova(murderSLR)
+```
+
+```{r}
+#Basic residual plots
+plot(murderSLR, which=1, pch=20)  #residual vs fits
+par(mfrow=c(1,2))                 
+hist(resid(murderSLR))            #histograam of residuals
+plot(murderSLR, which=2, pch=20)  #QQplot
+par(mfrow=c(1,1))
+
+qqPlot(murderSLR, pch=20)         #another QQplot
+par(mfrow=c(1,1))
+plot(resid(murderSLR), pch=20)
+```
+
+```{r}
+#get confidence interval for mean response at weapons=0.5
+newx<-data.frame(weapons=0.5)
+predict.lm(murderSLR, newx, se.fit=TRUE, interval="confidence", level=0.95)
+
+#get prediction interval for new individual at weapons=0.5
+predict.lm(murderSLR, newx, se.fit=TRUE, interval="prediction", level=0.95)
+```
+
+# Multiple Regression
+## Model Selection
+```{r}
+# Run full original model
+model <- lm(Salary ~ ., data = hitters)
+summary(model)
+```
+
+```{r}
+# Mallow's Cp method of finding model with lowest Cp compared to Pr value.
+leapout<-leaps(x=hitters[1:7], y=hitters$Salary, names=colnames(hitters)[1:7], method="Cp")
+cbind(leapout$size, leapout$which, leapout$Cp)
+```
+
+```{r}
+# Backward selection
+step(model, data=hitters, direction="backward")
+```
+
+```{r}
+# Create a null model to be able to run forward and step-wise selections
+modelNull<-lm(Salary~1, data=hitters)
+summary(modelNull)
+```
+
+```{r}
+# Forward selection
+step(modelNull, data=hitters, direction="forward", scope= ~Salary ~ Years + CAtBat + CHits + CHmRun + CRuns + CRBI + CWalks)
+```
+
+```{r}
+# Step-wise selection
+step(modelNull, data=hitters, direction="both", scope= ~Salary ~ Years + CAtBat + CHits + CHmRun + CRuns + CRBI + CWalks)
+```
+
+## Run new model
+```{r}
+# Run new model with best variables
+newmodel <- lm(Salary ~ CRBI + Years + CRuns + CAtBat + CHits, data = hitters)
+summary(newmodel)
+```
+
+## Point Prediction of Response
+```{r}
+# Predicted salary for player who has 186 career RBIs, has played for 9 years, has 192 career runs, 1876 career at bats, and 467 career hits.
+#confidence interval for mean response
+predict(newmodel, newdata= data.frame("CRBI" = 186, "Years" = 9, "CRuns" = 192, "CAtBat" = 1876, "CHits"= 467), level=0.95, interval="confidence")
+#prediction interval for new individual
+predict(newmodel, newdata= data.frame("CRBI" = 186, "Years" = 9, "CRuns" = 192, "CAtBat" = 1876, "CHits"= 467), level=0.95, interval="prediction")
+```
+
+## Check assumptions of Linear Regression
+```{r}
+#Residual plots
+tresid=rstudent(newmodel)
+par(mfrow=c(1,2))
+hist(tresid, pch=20)
+
+qqPlot(newmodel)
+plot(newmodel$fitted.values, tresid, pch=20)
+abline(h=0)
+plot(tresid, pch=20, type="o")
+abline(h=0)
+
+
+avPlots(newmodel)
+```
+
+Issues with constant variation and normality of the residuals
+
+## Fix non constant variation
+```{r}
+newmodel2 <- lm(log(Salary) ~ CRBI + Years + CRuns + CAtBat + CHits, data = hitters)
+summary(newmodel2)
+```
+
+Always start by taking natural ln (log) of the response variable.
+
+May need to take a log of one or multiple of the explanatory variables.
+
+```{r}
+# Recheck residual plots
+tresid=rstudent(newmodel2)
+par(mfrow=c(1,2))
+hist(tresid, pch=20)
+
+qqPlot(newmodel2)
+plot(newmodel2$fitted.values, tresid, pch=20)
+abline(h=0)
+plot(tresid, pch=20, type="o")
+abline(h=0)
+```
+
+Fixes our assumptions but now some explanatory variables aren't significant. Rerun variable selection section.
+
+```{r}
+# Create a null model to be able to run forward and step-wise selections
+modelNull2<-lm(log(Salary)~1, data=hitters)
+summary(modelNull2)
+```
+
+```{r}
+# Backward selection
+step(newmodel2, data=hitters, direction="backward")
+```
+
+```{r}
+# Step-wise selection
+step(modelNull2, data=hitters, direction="both", scope= ~log(Salary) ~ Years + CAtBat + CHits + CHmRun + CRuns + CRBI + CWalks)
+```
+
+## Run final model
+```{r}
+finalmodel <- lm(log(Salary) ~ CRuns + CAtBat + CHits, data = hitters)
+summary(finalmodel)
+```
+
+```{r}
+anova(finalmodel)
+```
+
+```{r}
+Anova(finalmodel)
+```
+
+
+## Checks for Multicollinearity
+```{r}
+vif(finalmodel)
+```
+
+VIFs indicate an issue with multicollinearity.
+
+```{r}
+# Standardize the variables and put back into dataset
+SCRuns <- hitters$CRuns-mean(hitters$CRuns)
+SCAtBat <- hitters$CAtBat-mean(hitters$CAtBat)
+SCHits <- hitters$CHits-mean(hitters$CHits)
+hitters2 <- cbind(hitters, SCRuns, SCAtBat, SCHits)
+hitters2
+```
+
+```{r}
+# Run new model with standardized variabless
+finalmodel2 <- lm(Salary ~ SCRuns + SCAtBat + SCHits, data = hitters2)
+summary(finalmodel2)
+vif(finalmodel2)
+```
+
+## Partial F-tests
+```{r}
+# Partial F-test of full original model and new final model
+anova(finalmodel, model)
+```
+
+## Checks for Outliers and Influential Points
+```{r}
+#residuals for outliers
+summary(tresid)
+qt(0.025, df=263-6, lower.tail=FALSE)
+qt(0.005, df=263-6, lower.tail=FALSE)
+par(mfrow=c(1,1))
+plot(tresid, pch=20, type="o")
+abline(h=0)
+abline(h=qt(0.025, df=263-6, lower.tail=FALSE), col="blue")
+abline(h=qt(0.025, df=263-6), col="blue")
+abline(h=qt(0.005, df=263-6, lower.tail=FALSE), col="red")
+abline(h=qt(0.005, df=263-6), col="red")
+tresid[1:263]
+
+#leverages
+plot(hatvalues(finalmodel), pch=20, type="o")
+abline(h=2*6/263, col="blue")  #cutoff: 2p/n
+
+#Influential points
+#Cook's distance
+plot(cooks.distance(finalmodel), pch=20, type="o")
+abline(h=qf(0.50, df1=6, df2=263-6), col="blue")
+abline(h=1, col="red")
+
+#DFBetas
+summary(dfbetas(finalmodel))
+plot(dfbetas(finalmodel)[,1], pch=20, type="o", ylim=c(-1,2))
+lines(dfbetas(finalmodel)[,2], pch=20, type="o", col="blue")
+lines(dfbetas(finalmodel)[,3], pch=20, type="o", col="dark green")
+lines(dfbetas(finalmodel)[,4], pch=20, type="o", col="dark red")
+abline(h=2/sqrt(51))     #cutoff 2/sqrt(n)
+abline(h=-2/sqrt(51))
+
+#DFfits
+summary(dffits(finalmodel))
+plot(dffits(finalmodel), pch=20, type="o")
+abline(h=2*sqrt(6/263), col="red")     #cutoff: 2 sqrt(p/n)
+abline(h=-2*sqrt(6/263), col="red")
+```
+
+## Autocorrelation test
+```{r}
+#Durbin-Watson Test 
+library(car)
+dwt(finalmodel, alternative="positive")
+```
+
+## Residuals
+```{r}
+#getting residuals
+model.resid<-resid(finalmodel)  #standard, e
+data.frame("mean"=mean(model.resid), "var"=var(model.resid)*31/29)
+plot(model.resid, pch=20)
+model.stresid<-rstandard(finalmodel)  #studentized, r
+data.frame("mean"=mean(model.stresid), "var"=var(model.stresid))
+plot(model.stresid, pch=20, col="blue")
+model.rstudent<-rstudent(finalmodel)   #deleted, t
+data.frame("mean"=mean(model.rstudent), "var"=var(model.rstudent))
+plot(model.rstudent, pch=20, col="red")
+
+#residual plots
+qqnorm(model.rstudent, pch=20)       #normal plot
+qqline(model.rstudent, col="blue")
+
+qqPlot(finalmodel, pch=20)
+hist(model.rstudent)
+# Shaprio-Wilk's and Kolmogorov-Smirnov tests for normality
+# larger p-values mean can't reject assumption of normality
+shapiro.test(model.rstudent)
+ks.test(model.rstudent, "pnorm")
+
+plot(hitters$CHits, model.rstudent, pch=20) #resid vs CHits
+abline(h=0)
+plot(hitters$CRuns, model.rstudent, pch=20) #resid vs CRuns
+abline(h=0)
+residualPlots(finalmodel)   #from car package
+```
+
+
+## Find best model including all possible interaction terms
+### Using R-squared Adjusted
+```{r}
+predictor_combinations <- regsubsets(Salary ~ .^2, data = hitters, method = "exhaustive")
+
+# Find the best model based on different criteria (e.g., adjusted R-squared)
+best_model <- summary(predictor_combinations)$which[which.max(summary(predictor_combinations)$adjr2), ]
+
+# Display the best model
+best_model_details <- summary(predictor_combinations)
+best_model_details$which[which.max(best_model_details$adjr2), ]
+```
+
+### Using BIC Values
+```{r}
+bic_values <- summary(predictor_combinations)$bic
+
+# Find the model with the lowest BIC (which often coincides with the lowest AIC)
+best_model_index <- which.min(bic_values)
+
+# Extract details of the best model
+best_model_details <- summary(predictor_combinations)
+best_model <- coef(predictor_combinations, id = best_model_index)
+best_model
+```
+
+## Polynomial Models
+```{r}
+#cubic model
+gatorCubic<-lm(weight~length+length2+length3, data=Gator)
+summary(gatorCubic)
+#Note: Can have R calculate the powers, but need to use I()
+#  (isolates the powers)
+gatorCubic2<-lm(weight~length+I(length^2)+I(length^3), data=Gator)
+summary(gatorCubic2)
+#note multicollinearity
+vif(gatorCubic)
+
+#Compare models
+plot(Gator$length, Gator$weight, pch=20)
+abline(lm(weight~length, data=Gator), col ="blue", lwd=2)
+lines(55:150, gatorCubic$coef[1]+gatorCubic$coef[2]*(55:150)+gatorCubic$coef[3]*(55:150)^2
+    +gatorCubic$coef[4]*(55:150)^3, col="red", lwd=2)
+
+
+#recentering to reduce multicollinearity
+clength<-Gator$length-mean(Gator$length)
+Gator<-cbind(Gator, clength)
+Gator
+gatorCubic3<-lm(weight~clength+I(clength^2)+I(clength^3), data=Gator)
+summary(gatorCubic3)
+vif(gatorCubic3)
+# can use scale() to fully standardize (still need I())
+gatorCubic4<-lm(weight~scale(length)+I(scale(length)^2)+I(scale(length)^3), data=Gator)
+summary(gatorCubic4)
+vif(gatorCubic4)
+# can also let R standardize-- and make orthogonal; not clear how to interpret
+gatorpoly3<-lm(weight~poly(length,3), data=Gator)
+summary(gatorpoly3)
+
+#Using Conditional SS to check for order
+gatorquintic<-lm(weight~clength+I(clength^2)+I(clength^3)+I(clength^4)+I(clength^5), data=Gator)
+summary(gatorquintic)
+anova(gatorquintic)
+```
+
+
+# Logisitc Regression
+## Simple
+```{r}
+#Fitting logistic regression model
+froglogit<-glm(mate~size, family=binomial(link="logit"), data=frog)
+summary(froglogit)
+oddsratio<-exp(coefficients(froglogit)["size"])
+oddsratio
+#Overall test of significance
+#if you don't specify test="Chisq", you won't get p-value
+anova(froglogit, test="Chisq") 
+
+```
+
+## Multiple
+```{r}
+#Fitting logistic regression model
+fordlogit<-glm(tire.related~vehicle.age+passengers+ford, 
+               family=binomial(link="logit"), data=ford)
+summary(fordlogit)
+
+#Overall test of significance
+#if you don't specify test="Chisq", you won't get p-value
+anova(fordlogit, test="Chisq") 
+#need to define comparison model for ANOVA chi-squared test
+fordnull<-glm(tire.related~1, family=binomial(link="logit"), data=ford)
+anova(fordnull, fordlogit, test="Chisq")
+
+resD<-residuals(fordlogit, type = c("deviance"))
+#can't use qqPlot from car in glm
+qqnorm(resD)
+plot(fordlogit, which=1)
+```
+
+### Prediction
+```{r}
+# Function to estimate probability using the logistic regression model
+estimate_probability <- function(vehicle_age, num_passengers, is_ford) {
+  # Creating a data frame with user inputs
+  new_data <- data.frame(vehicle.age = vehicle_age,
+                         passengers = num_passengers,
+                         ford = as.numeric(is_ford))
+  
+  # Predicting the probability using the logistic regression model
+  probability <- predict(fordlogit, newdata = new_data, type = "response")
+  
+  return(probability)
+}
+
+# Usage example:
+# Input values (replace these with your desired values)
+vehicle_age_input <- 2
+passengers_input <- 4
+ford_input <- FALSE  # or FALSE for non-Ford
+
+# Estimate probability using the function
+estimated_prob <- estimate_probability(vehicle_age_input, passengers_input, ford_input)
+print(estimated_prob)
+```
+
+# General Linear Model
+```{r}
+#Fitting Poisson (identity) regression model
+#chemid<-glm(Count~Time, family=poisson(link="identity"), data=chemical)
+#chemid<-glm(Count~Time, family=poisson(link="identity"), data=chemical, start=c(0.5, 0.5))
+#summary(chemid)
+#Note: glm will throw error/warning if can't converge or converges to model outside parameter range
+#For these data, linear intercept would be negative (not possible in Poisson)
+OLS<-lm(Count~Time, data=chemical)
+summary(OLS)
+#glm identity and lm models look the same, but use different estimation approaches
+#lm doesn't care that it predicts outside non-negative values
+WLS<-lm(Count~Time, data=chemical, weight=1/(Time))
+summary(WLS)
+# var is proportional to count, but have counts=0, so using time
+
+#fitting log link model
+chemlog<-glm(Count~Time, family=poisson(link="log"), data=chemical)
+summary(chemlog)
+#Overall test of significance
+#if you don't specify test="Chisq", you won't get p-value
+anova(chemlog, test="Chisq") 
+
+#plot the fitted curve
+plot(chemical$Time, chemical$Count, pch=20)
+#we use the predict function to get the predicted values
+#use curve to draw the curve on the graph
+curve(predict(OLS, data.frame(Time=x), type="response"), col="blue", lwd=2, add=TRUE)
+curve(predict(WLS, data.frame(Time=x), type="response"), col="red", lwd=2, add=TRUE)
+curve(predict(chemlog, data.frame(Time=x), type="response"), col="purple", lwd=2, add=TRUE)
+```
+
+# Random Forests
+```{r}
+rf.x <- hitters %>% dplyr::select(-Salary)
+rf.y <- hitters$Salary
+tuneRF(x=rf.x, y=rf.y, stepFactor=1.5, improve=0)
+```
+
+```{r}
+fit.rf <- randomForest(x=rf.x, y=rf.y, ntree=50)
+importance(fit.rf)
+varImpPlot(fit.rf, n.var=20)
+```
+
+# Categorical Analysis **Note* This code should only be used for reference as there are flaws*
+## Chapter 1
+### Two binary variables and Confidence intervals for the difference of two probabilities
+```{r}
+c.table <- array( data = c (57, 142, 200688, 201087) , dim = c(2, 2),
+dimnames = list("Treatment" = c("Vaccine", "Placebo"),
+"Polio" = c( "Polio", "Polie Free")))
+c.table
+```
+
+```{r}
+c.table [1 ,1]
+c.table [1 ,]
+sum(c.table[1 ,])
+rowSums(c.table )
+pi.hat.table <- c.table / rowSums(c.table)
+pi.hat.table
+```
+
+```{r}
+alpha <- 0.05
+pi.hat1 <- pi.hat.table [1 ,1]
+pi.hat2 <- pi.hat.table [2 ,1]
+```
+
+```{r}
+#Wald
+var.wald <- pi.hat1 * (1 - pi.hat1)/sum(c.table[1 ,]) +
+pi.hat2 * (1 - pi.hat2) / sum(c.table [2 ,])
+pi.hat1 - pi.hat2 + qnorm(p = c(alpha / 2, 1- alpha / 2))*
+sqrt(var.wald)
+```
+
+```{r}
+#Agresti-Caffo
+pi.tilde1 <- (c.table [1 ,1] + 1)/(sum(c.table [1 ,]) + 2)
+pi.tilde2 <- (c.table [2 ,1] + 1)/(sum(c.table [2 ,]) + 2)
+var.AC <- pi.tilde1 * (1 - pi.tilde1)/(sum(c.table [1 ,]) + 2)
+pi.tilde2 * (1 -pi.tilde2)/(sum(c.table [2 ,]) + 2)
+pi.tilde1 - pi.tilde2 + qnorm(p = c(alpha / 2, 1- alpha /2))*sqrt(var.AC)
+```
+
+```{r}
+w1 = 251
+n1 = 285
+w2 = 48
+n2 = 53
+pihat1 = w1/n1
+pihat2 = w2/n2
+pibar = (w1-w2)/(n1-n2)
+z = (pihat1-pihat2)/sqrt((pibar*(1-pibar)*((1/n1)+(1/n2))))
+z
+qnorm(0.975)
+
+chisq = (w1)
+```
+
+### Test for the difference of two probabilities
+```{r}
+prop.test(x = c.table, conf.level = 0.95, correct = FALSE)
+```
+
+```{r}
+chisq.test(x = c.table, correct = FALSE)
+qchisq(.95, 1)
+```
+
+### Relative Risk
+```{r}
+c.table2 <- array (data = c (251, 48, 34, 5), dim = c (2, 2), dimnames = list(First = c( "Made","Missed"), Second = c( "Made" , "Missed")))
+c.table2
+```
+
+```{r}
+pi.hat.table <- c.table2 / rowSums (c.table2)
+pi.hat.table
+
+pi.hat1 <- pi.hat.table [1 ,1]
+pi.hat2 <- pi.hat.table [2 ,1]
+
+round(pi.hat1 / pi.hat2, 4)
+
+round(1/(pi.hat1/pi.hat2), 4)
+```
+
+### Relative Risk
+```{r}
+alpha<- 0.05
+n1 <- sum(c.table2[1,])
+n2 <- sum(c.table2[2,])
+var.log.rr <- (1-pi.hat1) / (n1*pi.hat1) + (1-pi.hat2) / (n2*pi.hat2)
+ci <- exp(log(pi.hat1/pi.hat2) + qnorm(p = c(alpha/2, 1-alpha/2)) * sqrt(var.log.rr))
+
+round(ci, 4)
+
+rev(round(1/ci, 4))
+
+var.log.rr
+```
+
+```{r}
+cat("The sample relative risk is", round(pi.hat1/pi.hat2, 4), "\n \n")
+
+alpha<- 0.05
+n1 <- sum(c.table2[1,])
+n2 <- sum(c.table2[2,])
+ci <- exp(log(pi.hat1/pi.hat2) + qnorm(p = c(alpha/2, 1-alpha/2)) * sqrt((1-pi.hat1)/(n1*pi.hat1) + (1-pi.hat2)/(n2*pi.hat2)))
+
+round(ci, 4)
+
+rev(round(1/ci, 4))
+```
+
+```{r}
+(1-pi.hat1)/(1-pi.hat2)
+
+exp(log((1-pi.hat1)/(1-pi.hat2)) + qnorm(p = c(alpha/2, 1-alpha/2)) * sqrt((pi.hat1)/(n1*(1-pi.hat1)) +(pi.hat2)/(n2*(1-pi.hat2))))
+```
+
+### Odds Ratio
+```{r}
+c.table3 <- array( data = c (57, 142, 200688, 201087) , dim = c(2, 2),
+dimnames = list("Treatment" = c("Vaccine", "Placebo"),
+"Polio" = c( "Polio", "Polie Free")))
+c.table3
+```
+
+```{r}
+OR.hat <- c.table3[1,1] * c.table3[2,2]/(c.table3[2 ,1] * c.table3[1 ,2])
+round(OR.hat, 4)
+round(1/OR.hat, 4)
+```
+
+```{r}
+alpha <- 0.05
+var.log.or <- 1/c.table3[1,1] + 1/c.table3[1,2] + 1/c.table3[2,1] + 1 /c.table3[2,2]
+OR.CI <- exp(log(OR.hat) + qnorm(p = c(alpha / 2, 1-alpha / 2)) * sqrt(var.log.or))
+round(OR.CI, 4)
+rev(round(1/OR.CI, 4))
+```
+
+## Chapter 2
+### 2.2.1 Parameter Estimation
+```{r}
+mod.fit <- glm(formula = good ~ distance, family = binomial(link = logit), data = placekick)
+mod.fit
+```
+
+```{r}
+mod.fit$coefficients
+```
+
+```{r}
+summary(object = mod.fit)
+```
+
+```{r}
+linear.pred <- mod.fit$coefficients[1] + mod.fit$coefficients[2]*20
+exp(linear.pred)/(1+exp(linear.pred))
+as.numeric(exp(linear.pred)/(1+exp(linear.pred)))
+```
+
+```{r}
+linear.pred <- mod.fit$coefficients[1] + mod.fit$coefficients[2]*50
+exp(linear.pred)/(1+exp(linear.pred))
+as.numeric(exp(linear.pred)/(1+exp(linear.pred)))
+```
+
+```{r}
+curve(expr = exp(mod.fit$coefficients[1] + mod.fit$coefficients[2]*x) / (1 + exp(mod.fit$coefficients[1] + mod.fit$coefficients[2]*x)), col = "red", xlim = c(18, 66), ylab = expression(hat(pi)), xlab = "Distance", main = "estimated probability of success for a placekick")
+```
+
+```{r}
+mod.fit2 <- glm(formula = good ~ change + distance, family = binomial(link = logit), data = placekick)
+summary(mod.fit2)
+```
+
+```{r}
+vcov(mod.fit)
+
+vcov(mod.fit)[2,2]
+```
+
+```{r}
+summary(object = mod.fit)
+```
+
+```{r}
+summary(mod.fit)$coefficients[,2]^2
+```
+
+```{r}
+w<-aggregate(good ~ distance, data = placekick, FUN = sum)
+n<-aggregate(good ~ distance, data = placekick, FUN = length)
+w.n <- data.frame(distance = w$distance, success = w$good, trails = n$good, proportion = round(w$good/n$good, 4))
+head(w.n)
+```
+
+```{r}
+mod.fit.bin <- glm(formula = success/trails ~ distance, weight = trails, family = binomial(link = logit), data = w.n)
+```
+
+### 2.2.2 Hypothesis tests for regression parameters
+```{r}
+mod.fit2 <- glm(formula = good ~ change + distance, family = binomial(link = logit), data = placekick)
+summary(mod.fit2)
+```
+
+```{r, message=FALSE, warning=FALSE}
+Anova(mod = mod.fit2, test = "LR")
+```
+
+```{r}
+anova(object = mod.fit2, test = "Chisq")
+```
+
+```{r}
+mod.fit.Ho <- glm(formula = good ~ distance, family = binomial(link = logit), data = placekick)
+anova(mod.fit.Ho, mod.fit2, test = "Chisq")
+```
+
+```{r}
+mod.fit.Ho <- glm(formula = good ~ 1, family = binomial(link = logit), data = placekick)
+mod.fit.Ha <- glm(formula = good ~ change, family = binomial(link = logit), data = placekick)
+anova(mod.fit.Ho, mod.fit.Ha, test = "Chisq")
+```
+
+```{r}
+pi.hat.Ho <- mod.fit.Ho$fitted.values
+pi.hat.Ha <- mod.fit.Ha$fitted.values
+y <- placekick$good
+stat <-- 2*sum(y*log(pi.hat.Ho/pi.hat.Ha) + (1-y)*log((1-pi.hat.Ho)/(1-pi.hat.Ha)))
+stat
+pvalue<- 1-pchisq(q= stat, df=1)
+data.frame(stat, pvalue)
+```
+
+### 2.2.3 Odds Ratio
+
+
+### 2.2.4 Probability of Success
+```{r}
+predict.data <- data.frame(distance = c(20 ,30), change =c(1, 1))
+predict.data
+```
+
+```{r}
+alpha <- 0.05
+linear.pred <- predict(object = mod.fit2, newdata = predict.data, type = "link", se = TRUE)
+CI.lin.pred.x20 <- linear.pred$fit[1] + qnorm(p =c(alpha / 2, 1 - alpha / 2)) * linear.pred$se[1]
+CI.lin.pred.x30 <- linear.pred$fit[2] + qnorm(p =c(alpha / 2, 1 - alpha / 2)) * linear.pred$se[2]
+round(exp(CI.lin.pred.x20) / (1 + exp(CI.lin.pred.x20)), 4)
+# CI for distance = 20
+round(exp(CI.lin.pred.x30) / (1 + exp(CI.lin.pred.x30)), 4)
+```
+
+```{r}
+K <- matrix(data = c(1, 20), nrow = 1, ncol = 2)
+K
+```
+
+```{r}
+linear.combo <- mcprofile(object = mod.fit, CM = K)
+ci.logit.profile <- confint(object = linear.combo, level = 0.95)
+ci.logit.profile
+```
+
+```{r}
+names(ci.logit.profile)
+exp(ci.logit.profile$confint)/(1 + exp(ci.logit.profile$confint))
+```
+
+```{r}
+w <- aggregate(good ~ distance, data = placekick, FUN = sum)
+n <- aggregate(good ~ distance, data = placekick, FUN = length)
+w.n <- data.frame(distance = w$distance, success = w$good, trails = n$good, proportion = round(w$good/n$good, 4))
+head(w.n)
+```
+
+```{r}
+plot(x = w$distance, y = w$good/n$good, xlab="Distance (yards)", ylab = "Estimated probability", panel.first = grid(col = "gray", lty = "dotted"))
+curve(expr = predict(object = mod.fit, newdata = data.frame(distance = x), type = "response"), col = "red", add = TRUE, xlim = c(18, 66))
+```
+
+```{r}
+curve(expr = exp(mod.fit$coefficients[1] + mod.fit$coefficients[2] * x) / (1 + exp(mod.fit$coefficients[1] + mod.fit$coefficients[2] * x)), col = "red" , xlim = c(18, 66), ylab = expression(hat(pi)), xlab = "Distance", main = "Estimated probability of success for a placekick", panel.first = grid())
+```
+
+```{r}
+symbols(x = w$distance, y = w$good / n$good, circles = sqrt(n$good), inches = 0.5, xlab = "Distance(yards)", ylab = "Estimated probability", panel.first = grid(col ="gray", lty = "dotted"))
+curve(expr = predict(object = mod.fit, newdata = data.frame(distance = x), type = "response"), col = "red", add = TRUE, xlim = c(18, 66))
+```
+
+```{r}
+ci.pi <- function(newdata, mod.fit.obj, alpha) {
+  linear.pred<- predict(object = mod.fit.obj, newdata = newdata, type = "link", se = TRUE)
+  CI.lin.pred.lower <- linear.pred$fit - qnorm(p = 1 - alpha/2) * linear.pred$se
+  CI.lin.pred.upper <- linear.pred$fit + qnorm(p = 1 - alpha/2) * linear.pred$se
+  CI.pi.lower <- exp(CI.lin.pred.lower) / (1 + exp(CI.lin.pred.lower))
+  CI.pi.upper <- exp(CI.lin.pred.upper) / (1 + exp(CI.lin.pred.upper))
+  list(lower = CI.pi.lower, upper = CI.pi.upper)
+}
+
+ci.pi(newdata = data.frame(distance = 20), mod.fit.obj = mod.fit, alpha = 0.05)
+```
+
+```{r}
+curve(expr = ci.pi(newdata = data.frame(distance = x), mod.fit.obj = mod.fit, alpha = 0.05)$lower, col = "blue", lty = "dotdash", add = TRUE, xlim = c(18, 66))
+curve(expr = ci.pi(newdata = data.frame(distance = x), mod.fit.obj = mod.fit, alpha = 0.05)$upper, col = "blue", lty = "dotdash", add = TRUE, xlim = c(18, 66))
+legend(x = 20, y = 0.4, legend = c("Logistic regression model", "95% individual C.I."), lty = c("solid", "dotdash"), col = c("red", "blue"), bty = "n")
+```
+
+
+### 2.2.5 Interaction Terms
+```{r}
+mod.fit.Ha <- glm(good ~ distance + wind + distance:wind, family = binomial(link = logit), data = placekick)
+summary(mod.fit.Ha)
+```
+
+```{r}
+mod.fit.Ho <- glm(good ~ distance + wind, family = binomial(link = logit), data = placekick)
+anova(mod.fit.Ho, mod.fit.Ha, test = "Chisq")
+```
+
+```{r}
+curve(expr = predict(object = mod.fit.Ho, newdata = data.frame(distance = x, wind = 0), type = "response"), col = "red", lty = "solid", xlim = c(20,60), ylim = c(0,1), ylab = "Estimated probability", main = "Without Interaction", xlab = "Distance", panel.first = grid(col = "gray", lty = "dotted"), cex.main = 0.9, lwd = 1)
+
+curve(expr = predict(object = mod.fit.Ho, newdata = data.frame(distance = x, wind = 1), type = "response"), col = "blue", lty = "dotdash", lwd = 1, add = TRUE)
+
+legend
+
+curve(expr = predict(object = mod.fit.Ha, newdata = data.frame(distance = x, wind = 0), type = "response"), col = "red", lty = "solid", xlim = c(20,60), ylim = c(0,1), ylab = "Estimated probability", main = "Without Interaction", xlab = "Distance", panel.first = grid(col = "gray", lty = "dotted"), cex.main = 0.9, lwd = 1)
+
+curve(expr = predict(object = mod.fit.Ha, newdata = data.frame(distance = x, wind = 1), type = "response"), col = "blue", lty = "dotdash", lwd = 1, add = TRUE)
+```
+
+```{r}
+curve(expr = exp(mod.fit.Ha$coefficients[1] + mod.fit.Ha$coefficients[2] * x) / (1 + exp(mod.fit.Ha$coefficients[1] + mod.fit.Ha$coefficients[2] * x)), col = "red" , xlim = c(18, 66), ylab = expression(hat(pi)), xlab = "Distance", main = "Estimated probability of success for a placekick", panel.first = grid())
+```
+
+```{r}
+Anova(mod.fit.Ha, test = "LR")
+```
+
+```{r}
+beta.hat <- mod.fit.Ha$coefficients[2:4]
+c <- 1
+distance <- seq(from = 20, to = 60, by = 10)
+OR.wind <- exp(c*(beta.hat[2] + beta.hat[3] * distance))
+cov.mat <- vcov(mod.fit.Ha)[2:4,2:4]
+# Var(beta^_2 + distance * beta^_3)
+var.log.OR <- cov.mat[2,2] + distance^2 * cov.mat[3,3] + 2 * distance * cov.mat[2, 3]
+ci.log.OR.low <- c * (beta.hat[2] + beta.hat[3] * distance) - c * qnorm(p = 0.975) * sqrt(var.log.OR)
+ci.log.OR.up <- c * (beta.hat[2] + beta.hat[3] * distance) + c * qnorm(p = 0.975) * sqrt(var.log.OR)
+round(data.frame(distance = distance, OR.hat = 1 / OR.wind, OR.low = 1 / exp(ci.log.OR.up), OR.up = 1 / exp(ci.log.OR.low)),2)
+```
+
+```{r}
+c <- 10
+wind <- 0:1
+OR.dist <- exp(c*(beta.hat[1] + beta.hat[3]*wind))
+#Estimated OR
+var.log.OR <- cov.mat [1,1] + wind^2*cov.mat[3,3] + 2*wind*cov.mat[1,3]
+ci.log.OR.low <- c*(beta.hat[1] + beta.hat[3]*wind) - c*qnorm(p = 0.975) * sqrt(var.log.OR)
+ci.log.OR.up <- c*(beta.hat[1] + beta.hat[3]*wind) + c*qnorm(p = 0.975) * sqrt(var.log.OR)
+data.frame(OR.dist, OR.low = exp(ci.log.OR.low), OR.up = exp(ci.log.OR.up))
+```
+
+
+```{r}
+beta.hat <- mod.fit.Ha$coefficients[2:4]
+c<-1
+distance <- seq(from = 20, to = 60, by = 10)
+OR.wind <- exp(c*(beta.hat[2] + beta.hat[3] * distance))
+cov.mat <- vcov(mod.fit.Ha)[2:4,2:4]
+#Var ( beta ^ _ 2 + distance * beta ^ _ 3)
+var.log.OR <- cov.mat[2,2] + distance^2 * cov.mat[3,3] + 2 * distance * cov.mat[2,3]
+ci.log.OR.low <- c * (beta.hat[2] + beta.hat[3] * distance) - c * qnorm(p = 0.975) * sqrt(var.log.OR)
+ci.log.OR.up <- c * (beta.hat[2] + beta.hat[3] * distance) + c * qnorm(p = 0.975) * sqrt(var.log.OR)
+round(data.frame(distance = distance, OR.hat = 1 / OR.wind, OR.low = 1 / exp(ci.log.OR.up), OR.up = 1 / exp(ci.log.OR.low)), 2)
+```
+
+```{r}
+c <- 10 # 10 - yard increment
+wind <- 0:1 # Examine wind for 0 and 1
+OR.dist <- exp(c*(beta.hat[1] + beta.hat[3] * wind))
+#Estimated OR
+var.log.OR <- cov.mat[1,1] + wind ^2 * cov.mat[3,3] + 2 * wind * cov.mat[1,3]
+# Var ( beta ^_ 2 + distance * beta ^ _ 3)
+ci.log.OR.low <- c * (beta.hat[1] + beta.hat[3] * wind) - c * qnorm(p = 0.975) * sqrt(var.log.OR)
+ci.log.OR.up <- c * (beta.hat[1] + beta.hat[3] * wind) + c * qnorm(p = 0.975) * sqrt(var.log.OR)
+data.frame(OR.dist, OR.low = exp(ci.log.OR.low),
+OR.up = exp(ci.log.OR.up))
+```
+
+### 2.2.6
+#### Recoding a variable with reference to one variable
+```{r}
+set1 <- data.frame(cat.var = c("D", "A", "A", "B", "D", "C"))
+set1
+
+class(set1$cat.var)
+levels(set1$cat.var)
+#contrasts(set1$cat.var)
+```
+
+```{r}
+#cat.var2 <- relevel(x = set1$cat.var, ref = "D")
+#set2 <- data.frame(set1, cat.var2)
+#set2
+```
+
+```{r}
+#set1$cat.var2 <- relevel(x = set1$cat.var, ref = "D")
+#set1
+
+#levels(set1$cat.var2)
+#contrasts(set1$car.var2)
+```
+
+```{r}
+class(tomato$Control)
+levels(tomato$Control)
+#contrasts(tomato$Control)
+```
+
+```{r}
+levels(tomato$Infest)
+class(factor(tomato$Infest))
+levels(factor(tomato$Infest))
+#contrasts(factor(tomato$Infest))
+```
+
+```{r}
+tomato$Infest <- factor(tomato$Infest)
+class(tomato$Infest)
+```
+
+```{r}
+mod.fit <- glm(formula = Virus8/Plants ~ Infest + Control, family = binomial(link = logit), data = tomato, weight = Plants)
+summary(mod.fit)
+```
+
+```{r}
+mod.fit.inter <- glm(formula = Virus8/Plants ~ Control + Infest:Control, family = binomial(link = logit), data = tomato, weight = Plants)
+summary(mod.fit.inter)
+```
+
+```{r}
+mod.fit <- glm(formula = Virus8/Plants ~ Infest + Control, family = binomial(link = logit), data = tomato, weight = Plants)
+summary(mod.fit)
+```
+
+```{r}
+Anova(mod.fit.inter)
+```
+
+```{r}
+mod.fit$xlevels
+```
+
+```{r}
+exp(mod.fit$coefficients[3:4])
+exp(mod.fit$coefficients[4] - mod.fit$coefficients[3])
+```
+
+```{r}
+K <- matrix(data = c(0, 0, 1, 0, 0, 0, 0, 1), nrow = 2, ncol = 4, byrow = TRUE)
+linear.combo <- mcprofile(object = mod.fit, CM = K)
+ci.log.OR <- confint(object = linear.combo, level = 0.95, adjust = "none")
+ci.log.OR
+```
+
+```{r}
+comparison <- c("C vs B", "N vs B")
+data.frame(comparison, OR = exp(ci.log.OR$confint))
+```
+
+```{r}
+save.wald <- wald(object = linear.combo)
+ci.logit.wald <- confint(object = save.wald, level = 0.95, adjust = "none")
+data.frame(comparison, lower = exp(ci.logit.wald$confint[,1]), upper = exp(ci.logit.wald$confint[,2]))
+```
+
+```{r}
+#Profile likelihood ratio interval
+exp(confint(object = mod.fit, parm = c("ControlC", "ControlN"), level = 0.95))
+```
+
+```{r}
+# Wald interval
+exp(confint.default(object = mod.fit, parm = c("ControlC", "ControlN"), level = 0.95))
+```
+
+```{r}
+K <- matrix(data = c(0, 0, -1, 1), nrow = 1, ncol = 4, byrow = TRUE)
+linear.combo <- mcprofile(object = mod.fit, CM = K)
+ci.log.OR <- confint(object = linear.combo, level = 0.95, adjust = "none")
+ci.log.OR
+```
+
+```{r}
+data.frame(comparison = "N vs C", OR = exp(ci.log.OR$confint))
+save.wald <- wald(object = linear.combo)
+ci.logit.wald <- confint(object = save.wald, level = 0.95, adjust = "none")
+data.frame(lower = exp(ci.logit.wald$confint[,1]), upper = exp(ci.logit.wald$confint[,2]))
+```
+
+```{r}
+beta.hat <- mod.fit$coefficients[-1]
+exp(beta.hat[3] - beta.hat[2])
+cov.mat <- vcov(mod.fit)[2:4, 2:4]
+var.N.C <- cov.mat[3,3] + cov.mat[2,2] - 2*cov.mat[3,2]
+CI.betas <- beta.hat[3] - beta.hat[2] + qnorm(p = c(0.025, 0.975)) * sqrt(var.N.C)
+exp(CI.betas)
+```
+
+```{r}
+mod.fit2 <- glm(formula = Virus8/Plants ~ Infest + Control, family = binomial(link = logit), data = tomato, weight = Plants)
+summary(mod.fit2)
+```
+
+```{r}
+# Wald interval
+exp(confint.default(object = mod.fit2, parm = c("Control.reorderB", "Control.reorderN"), level = 0/95))
+
+c(1/2.8629521, 1/1.707073)
+```
+
+```{r}
+# Profile likelihood ratio interval
+#exp(confint(object = mod.fit2, parm = c("Control.reorderB", "Control.reorderN"), level = 0.95))
+```
+
+```{r}
+K <- matrix(data = c(0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, -1, 1, 0, 0, 0, 0, -1, 1, -1, 1), nrow = 6, ncol = 6, byrow = TRUE)
+#linear.combo <- mcprofile(object = mod.fit.inter, Cm = K)
+#ci.log.OR <- confint(object = linear.combo, level - 0.95, adjust = "none")
+#ci.log.OR
+```
+
+```{r}
+comparison <- c("N vs B", "N vs B", "C vs B", "C vs B", "N vs C", "N vs C")
+data.frame(Infest2 = c(0, 1, 0, 1, 0, 1), comparison, OR = round(exp(ci.log.OR$estimate), 2), OR.CI = round(exp(ci.log.OR$confint), 2))
+```
+
+```{r}
+save.wald <- wald(object = linear.combo)
+ci.logit.wald <- confint(object = save.wald, level = 0.95, adjust = "none")
+data.frame(Infest2 = c(0, 1, 0, 1, 0, 1), comparison, OR = round(exp(ci.log.OR$estimate), 2), lower = round(exp(ci.logit.wald$confint[,1]), 2), upper = round(exp(ci.logit.wald$confint[,2]), 2))
+```
+
+## Chapter 3
+### 3.1 Multinomial Probability Distribution
+```{r}
+pi.j <- c(0.25, 0.35, 0.2, 0.1, 0.1)
+set.seed(2195)
+n.j <- rmultinom(n = 1, size = 1000, prob = pi.j)
+data.frame(n.j, pihat.j = n.j/1000, pi.j)
+```
+
+```{r}
+n.j <- rmultinom(n = 6, size = 1000, prob = pi.j)
+n.j
+
+n.j/1000
+```
+
+### 3.2 Contingency Tables and Inference Procedures
+```{r}
+pi.ij <- c(0.2, 0.3, 0.2, 0.1, 0.1, 0.1)
+pi.table <- array(data = pi.ij, dim = c(2,3), dimnames = list(X = 1:2, Y = 1:3))
+pi.table
+```
+
+```{r}
+set.seed(9812)
+save <- rmultinom(n = 1, size = 1000, prob = pi.ij)
+c.table_1 <- array(data = save, dim = c(2,3), dimnames = list(X = 1:2, Y = 1:3))
+c.table_1
+c.table_1/sum(c.table_1)
+```
+
+```{r}
+pi.cond <- pi.table/rowSums(pi.table)
+pi.cond
+```
+
+```{r}
+set.seed(8111)
+save1 <- rmultinom(n = 1, size = 400, prob = pi.cond[1,])
+save2 <- rmultinom(n = 1, size = 600, prob = pi.cond[2,])
+c.table_2 <- array(data = c(save1[1], save2[1], save1[2], save2[2], save1[3], save2[3]), dim = c(2,3), dimnames = list(X = 1:2, Y = 1:3))
+c.table_2
+
+rowSums(c.table_2)
+
+c.table_2/rowSums(c.table_2)
+round(c.table_1/rowSums(c.table_1), 4)
+```
+
+```{r}
+diet$fiber <- factor(x = diet$fiber, levels = c("none", "bran", "gum", "both"))
+diet$bloat <- factor(x = diet$bloat, levels = c("none", "low", "medium", "high"))
+diet.table <- xtabs(formula = count ~ fiber + bloat, data = diet)
+diet.table
+```
+
+```{r}
+ind.test <- chisq.test (x = diet.table, correct = FALSE)
+ind.test
+```
+
+```{r}
+class(diet.table)
+summary(diet.table)
+qchisq(p = 0.95, df = 9)
+```
+
+```{r}
+ind.test$expected
+```
+
+### 3.3 Nominal Response Models
+```{r}
+levels(wheat$type)
+
+mod.fit.nom.density <- multinom(formula = type ~ class + density + hardness + size + weight + moisture, data = wheat)
+summary(mod.fit.nom.density)
+```
+
+```{r}
+#lwd.po <- 4
+
+#curve(expr = plogis(q = mod.fit.nom.density$zeta[1] - mod.fit.nom.density$coefficients*x), col = "green", type = "l", xlim =c(min(wheat$density[wheat$type.order == "Scab"]), max(wheat$density[wheat$type.order == "Scab"])), add = TRUE, lty = "dotdash", lwd = lwd.po, n = 1000)
+
+#curve(expr = plogis(q = mod.fit.nom.density$zeta[2] - mod.fit.nom.density$coefficients*x) - plogis(q = mod.fit.nom.density$zeta[1] - mod.fit.nom.density$coefficients*x), col = "red", type = "l", xlim =c(min(wheat$density[wheat$type.order == "Sprout"]), max(wheat$density[wheat$type.order == "Sprout"])), add = TRUE, lty = "longdash", lwd = lwd.po, n = 1000)
+
+#curve(expr = 1 - plogis(q = mod.fit.nom.density$zeta[2] - mod.fit.nom.density$coefficients*x), col = "black", type = "l", xlim =c(min(wheat$density[wheat$type.order == "Healthy"]), max(wheat$density[wheat$type.order == "Healthy"])), add = TRUE, lty = "solid", lwd = lwd.po, n = 1000)
+
+#legend(x = 1.4, y = 0.8, legend = c("Healthy", "Sprout", "Scab"), lty = c("solid", "longdash", "dotdash"), col = c("black", "red", "green"), bty = "n", lwd = c(2,2,2), seg.len = 4)
+```
+
+```{r}
+density.values <- seq(from = 0.8, to = 1.6, by = 0.1)
+data.frame(density.values, round(predict(object = mod.fit.nom.density, newdata = data.frame(density = density.values), type = "probs"), 2))
+```
+
+```{r}
+wheat2 <- data.frame(kernal = 1:nrow(wheat), wheat[,2:6], class.new = ifelse(test = wheat$class == "hrw", yes = 0, no = 1))
+head(wheat2)
+
+wheat.colors <- ifelse(test = wheat$type == "healthy", yes = "black", no = ifelse(test = wheat$class == "Sprout", yes = "red", no = "green"))
+
+wheat.lty
+```
+
+### 3.3.1 Odds Ratios
+```{r}
+sd.wheat <- apply(X = wheat[,-c(1,7)], MARGIN = 2, FUN = sd)
+c.value <- c(1, sd.wheat)
+round(c.value, 2)
+beta.hat2 <- coefficients(mod.fit)[1, 2:7]
+beta.hat3 <- coefficients(mod.fit)[2, 2:7]
+round(exp(c.value*beta.hat2), 2)
+round(1/exp(c.value*beta.hat2), 2)
+round(exp(c.value*beta.hat3), 2)
+round(1/exp(c.value*beta.hat3), 2)
+```
+
+```{r}
+conf.beta <- confint(object = mod.fit, level = 0.95)
+conf.beta
+```
+
+```{r}
+ci.OR2 <- exp(c.value*conf.beta[2:7, 1:2, 1])
+ci.OR3 <- exp(c.value*conf.beta[2:7, 1:2, 2])
+round(data.frame(low = ci.OR2[,1], up = ci.OR2[,2]), 2)
+round(data.frame(low = 1/ci.OR2[,2], up = 1/ci.OR2[,1]), 2)
+round(data.frame(low = ci.OR3[,1], up = ci.OR3[,2]), 2)
+round(data.frame(low = 1/ci.OR3[,2], up = 1/ci.OR3[,1]), 2)
+```
+
+### 3.3.2 Contingency Tables
+```{r}
+mod.fit.nom <- multinom(formula = bloat ~ fiber, weights = count, data = diet)
+summary(mod.fit.nom)
+```
+
+```{r}
+Anova(mod.fit.nom)
+```
+
+### 3.4 Ordinal Response Models
+```{r}
+levels(wheat$type)
+wheat$type.order <- factor(wheat$type, levels = c("scab", "Sprout", "Healthy"))
+levels(wheat$type.order)
+```
+
+```{r}
+mod.fit.ord <- polr(type.order ~ class + density + hardness + size + weight + moisture, data = wheat, method = "logistic")
+summary(mod.fit.ord)
+```
+
+```{r}
+Anova(mod.fit.ord)
+```
+
+```{r}
+pi.hat.ord <- predict(object = mod.fit.ord, type = "probs")
+head(pi.hat.ord)
+head(predict(object = mod.fit.ord, type = "class"))
+```
+
+### 3.4.1 Odds Ratios
+```{r}
+sd.wheat <- apply(X = wehat[,-c(1,7)], MARGIN = 2, FUN = sd)
+round(c.value, 2)
+c.value <- c(1, sd.wheat)
+round(exp(c.value * (-mod.fit.ord$coefficients)), 2)
+round(1/exp(c.value * (-mod.fit.ord$coefficients)), 2)
+```
+
+```{r}
+conf.beta <- confint(object = mod.fit.ord, level = 0.95)
+ci <- exp(c.value*(-conf.beta))
+round(data.frame(low = ci[,2], up = ci[,1]), 2)
+round(data.frame(low = 1/ci[,1], up = 1/ci[,2]), 2)
+```
+
+### 3.4.2 Contingency Tables
+```{r}
+levels(diet$bloat)
+mod.fot.ord <- polr(formula = bloat ~ fiber, weights = count, data = diet, method = "logistic")
+summary(mod.fit.ord)
+```
+
+```{r}
+Anova(mod.fit.ord)
+```
+
+### 3.4.3 Non-proportional odds model
+```{r}
+vlgm()
+```
+
+### 3.4
+```{r}
+beta <- c(0, 2, 4, 2)
+x.range <- c(-5, 3)
+par(mfrow = c(1,1))
+setEPS()
+postscript("3-4.eps")
+curve(expr = plogis(q = beta[1] + beta[4] * x), xlim = x.range, ylab = expression(P(Y<=j)), xlab = expression(x[1]), main = "Cumulative probabilites for Y", lwd =2)
+curve(expr = plogis(q = beta[2] + beta[4]*x), add = TRUE, lty = "dashed", col ="red", lwd = 2)
+curve(expr = plogis(q = beta[3] + beta[4]*x), add = TRUE, lty = "dotted", col ="blue", lwd = 2)
+legend(x = -0.5, y = 0.9, legend = c(expression(P(Y<=1)), expression(P(Y<=2)), expression(P(Y<=3))), lty = c("solid", "dashed", "dotted", "dotdash"), col = c("black", "red", "blue"), bty="n", lwd =2)
+```
+
+## Chapter 4
+### 4.1 Poisson Model for Count Data
+```{r}
+mean(stoplight$vehicles)
+var(stoplight$vehicles)
+table(stoplight$vehicles)
+rel.freq <- table(stoplight$vehicles) / length(stoplight$vehicles)
+rel.freq2 <- c(rel.freq, rep(0, times =7))
+```
+
+```{r}
+y <- 0:15
+prob <- round(dpois(x=y, lambda = mean(stoplight$vehicles)))
+data.frame(y, prob, rel.freq = rel.freq2)
+```
+
+```{r}
+plot(x = y-0.1, y = prob, type = "h", ylab = "Probability", xlab = "Number of Vechicles", lwd = 2, xaxt = "n")
+axis(side = 1, at = 0:15)
+lines(x = y+0.1, y = rel.freq2, type = "h", lwd = 2, lty = "solid", col = "red")
+abline(h = 0)
+legend(x = 9, y = 0.15, legend = c("Poisson", "Observed"), lty = c("solid", "solid"), lwd = c(2,2), col = c("black", "red"), bty = "n")
+```
+
+```{r}
+alpha <- 0.05
+n <- length(stoplight$vehicles)
+mu.hat <- mean(stoplight$vehicles)
+lower <- (mu.hat + (qnorm(p = c(alpha/2, 1-alpha/2)))^2) - (qnorm(p = c(alpha/2, 1-alpha/2))) * sqrt((mu.hat-((qnorm(p = c(alpha/2, 1-alpha/2)))^2)/(4*n))/n)
+upper <- (mu.hat + (qnorm(p = c(alpha/2, 1-alpha/2)))^2) + (qnorm(p = c(alpha/2, 1-alpha/2))) * sqrt((mu.hat-((qnorm(p = c(alpha/2, 1-alpha/2)))^2)/(4*n))/n)
+interval
+```
+
+#4.2.2 Parameter estimation and inference
+```{r}
+mod.fit <- glm(formula = satellite ~ width, data = crab, family = poisson(link = log))
+summary(mod.fit)
+```
+
+```{r}
+plot(x = crab$width, y = crab$satellite, xlab = "Width (cm)", ylab = "Number of Satellites", main = "Horseshoe crab data set with Poisson regression model fit", panel.first = grid())
+curve(expr = exp(mod.fit$coefficients[1] + mod.fit$coefficients[2]*x), col = "red", add = TRUE, lty = "solid")
+ci.mu <- function(newdata, mod.fit.obj, alpha) {
+  lin.pred.hat <- predict(object = mod.fit.obj, newdata = newdata, type = "link", se = TRUE)
+  lower <- exp(exp.pred.hat$fit - qnorm(1 - alpha/2) * lin.pred.hat$se)
+  upper <- exp(exp.pred.hat$fit + qnorm(1 - alpha/2) * lin.pred.hat$se)
+  list(lower = lower, upper = upper)
+}
+```
+
+```{r}
+ci.mu(newdata = data.frame(width = 23), mod.fit.obj = mod.fit, alpha = 0.95)
+```
+
+```{r}
+curve(expr = ci.mu(newdata = data.frame(width = x), mod.fit.obj = mod.fit, alpha = 0.95)$lower, col = "blue", add = TRUE, lty = "dotdash")
+curve(expr = ci.mu(newdata = data.frame(width = x), mod.fit.obj = mod.fit, alpha = 0.95)$upper, col = "blue", add = TRUE, lty = "dotdash")
+legend(x = 21, y = 14, legend = c("Poisson regression model", "95% individual C.I."), bty = "n", lty = c("solid", "dotdash"), col = c("red", "blue"))
+```
+
+```{r}
+groups <- ifelse(test = crab$width<23.25, yes = 1, no = ifelse(test = crab$width<24.25, yes = 2, no =ifelse(test = crab$width<25.25, yes = 3, no =ifelse(test = crab$width<26.25, yes = 4, no =ifelse(test = crab$width<27.25, yes = 5, no =ifelse(test = crab$width<28.25, yes = 6, no =ifelse(test = crab$width<29.25, yes = 7, no = 8)))))))
+crab.group <- data.frame(crab, groups)
+head(crab.group)
+```
+
+```{r}
+ybar <- aggregate(formula = satellite ~ groups, data = crab, FUN = mean)
+xbar <- aggregate(formula = width ~ groups, data = crab, FUN = mean)
+data.frame(ybar, xbar$width)
+```
+
+```{r}
+points(x = xbar$width, y = ybar$satellite, pch = 17, col = "darkgreen", cex = 2)
+#first legend() call
+```
+
+```{r}
+legend(x = 21, y = 14, legned = c("Poisson regression model", "95% individual C.I.", "sample mean"), bty = "n", lty = c("solid", "dotdash", NA), col = c("red", "blue", "darkgreen"), pch = c(NA, NA, 17))
+```
+
+```{r}
+exp(mod.fit$coefficients[2])
+100*(exp(mod.fit$coefficients[2]) - 1)
+```
+
+```{r}
+c.unit <- sd(crab$width)
+c.unit
+100*(exp(c.unit*mod.fit$coefficients[2]) - 1)
+```
+
+```{r}
+beta.ci <- confint(object = mod.fit, parm = "width", level = 0.95)
+100*(exp(beta.ci) - 1)
+```
+
+```{r}
+K <- matrix(data = c(0, 1), nrow = 1, ncol = 2)
+linear.combo <- mcprofile(object = mod.fit, CM = K)
+ci.beta <- confint(object = linear.combo, level = 0.95)
+100*(exp(ci.beta$confint) - 1)
+```
+
+```{r}
+beta.ci <- confint.default(object = mod.fit, parm = "width", level = 0.95)
+beta.ci
+exp(beta.ci)
+100*(exp(beta.ci) - 1)
+```
+
+```{r}
+vcov(mod.fit)
+```
+
+```{r}
+beta.ci <- mod.fit$coefficients[2] + qnorm(p = c(0.025, 0.975)) * sqrt(vcov(mod.fit)[2,2])
+100*(exp(beta.ci) - 1)
+```
+
+#4.2.4 Poisson Regression for Contingency Tables: LogLinear Models
+```{r}
+c.table4 <- array(data = c(251, 48, 34, 5), dim = c(2,2), dimnames = list(First = c("made", "missed"), Second = c("made", "missed")))
+bird <- as.data.frame(as.table(c.table4))
+bird
+```
+
+```{r}
+mod.fit1 <- glm(formula = Freq ~ First + Second, data = bird, family = poisson(link = log))
+summary(mod.fit1)
+```
+
+```{r}
+predict(object = mod.fit1, newdata = bird, type = "response")
+pearson.test <- chisq.test(x = c.table, correct = FALSE)
+pearson.test$expected
+```
+
+```{r}
+mod.fit2 <- glm(formula = Freq ~ First + Second + First:Second, data = bird, family = poisson(link = log))
+summary(mod.fit2)
+```
+
+```{r}
+predict(object = mod.fit2, newdata = bird, type = "response")
+bird$Freq
+```
+
+```{r}
+Anova(mod.fit2, test = "LR")
+```
+
+```{r}
+anova(mod.fit1, mod.fit2, test = "Chisq")
+```
+
+```{r}
+assocstats(c.table)
+```
+
+#4.3 Poisson Rate Regression
+```{r}
+total.sat <- aggregate(satellite ~ width, data = crab, FUN = sum)
+numb.crab <- aggregate(satellite ~ width, data = crab, FUN = length)
+rate.data <- data.frame(total.sat, numb.crab = numb.crab$satellite)
+head(rate.data)
+```
+
+```{r}
+mod.fit.rate <- glm(formula = satellite ~ width + offset(log(numb.crab)), data = rate.data, family = poisson(link = log))
+summary(mod.fit.rate)
+```
+
+```{r}
+predict(object = mod.fit.rate, newdata = data.frame(width = c(23, 23), numb.crab = c(1, 2)), type = "response")
+```
+
+```{r}
+plot.char.numb <- as.numeric(names(table(rate.data$numb.crab)))
+plot(x = rate.data$width, y = rate.data$satellite, xlab = "Width (cm)", ylab = "Number of satellites", type = "n", panel.first = grid(), main = "Horseshoe crab data set with Poisson regression model fir (rate data)")
+for (t in plot.char.numb) {
+  width.t <- rate.data$width[rate.data$numb.crab == plot.char.numb[t]]
+  satellite.t <- rate.data$satellite[rate.data$numb.crab == plot.char.numb[t]]
+  points(x = width.t, y = satellite.t, pch = as.character(plot.char.numb[t]), cex = 0.5, col = t)
+  curve(expr = t * exp(mod.fit.rate$coefficients[1] + mod.fit.rate$coefficients[2]*x), xlim = c(min(width.t), max(width.t)), lty = "solid", col = t, add = TRUE)
+}
+```
+
+```{r}
+for (t in plot.char.numb) {
+  width.t <- rate.data$width[rate.data$numb.crab == plot.char.numb[t]]
+  satellite.t <- rate.data$satellite[rate.data$numb.crab == plot.char.numb[t]]
+  points(x = width.t, y = satellite.t, pch = as.character(plot.char.numb[t]), cex = 0.5, col = t)
+  curve(expr = t * exp(mod.fit.rate$coefficients[1] + mod.fit.rate$coefficients[2]*n), xlim = c(min(width.t), max(width.t)), lty = "solid", col = t, add = TRUE)
+}
+```
+
+```{r}
+Anova(mod.fit)
+```
+
+```{r}
+Anova(mod.fit.rate)
+```
+
+## Chapter 5
+### 5.1 Variable Selection
+```{r}
+search.1.aicc <- glmulti(y = good ~ ., data = placekick, fitfunction = "glm", level = 1, method = "h", crit = "aicc", family = binomial(link="logit"))
+```
+
+```{r}
+aa <- weightable(search.1.aicc)
+head(aa)
+```
+
+```{r}
+cbind(model = aa[1:5,1], round(aa[1:5, c(2,3)], 3))
+```
+
+```{r}
+set.seed(87112811)
+search.gmarg.aicc <- glmulti(y = good ~ ., data = placekick, fitfunction = "glm", level = 2, marginality =TRUE, method = "g", crit = "aicc", family = binomial(link = "logit"))
+```
+
+```{r}
+print(search.gmarg.aicc)
+```
+
+```{r}
+set.seed(91051211)
+head(weightable(search.gmarg.aicc))
+```
+
+```{r}
+set.seed(11256012)
+head(weightable(search.gmarg.aicc))
+```
+
+```{r}
+empty.mod <- glm(good ~ 1, family = binomial(link = logit), data = placekick)
+full.mod <- glm(good ~ ., family = binomial(link = logit), data = placekick)
+```
+
+```{r}
+forw.sel <- step(object = empty.mod, scope = list(upper = full.mod), direction = "forward", k = log(nrow(placekick)), trace = TRUE)
+```
+
+```{r}
+anova(forw.sel)
+```
+
+```{r}
+forw.sel2 <- step(object = empty.mod, scope = list(upper = full.mod), direction = "forward", k = 2, trace = TRUE)
+```
+
+```{r}
+anova(forw.sel2)
+```
+
+```{r}
+search.1.bic <- glmulti(y = good ~ ., data = placekick, fitfunction = "glm", level = 1, method = "h", crit = "bic", family = binomial(link = "logit"))
+print(search.1.bic)
+```
+
+```{r}
+head(weightable(search.1.bic))
+```
+
+```{r}
+plot(search.1.bic, type = "w")
+```
+
+```{r}
+parms <- coef(search.1.bic)
+colnames(parms) <- c("Estimate", "Variance", "n.Models", "Probability", "95%CI +/-")
+round(parms, digits = 3)
+```
+
+```{r}
+parm.ord <- parms[order(parms[,4], decreasing = TRUE),]
+ci.parms <- cbind(lower = parm.ord[,1] - parms.ord[,5], upper = parm.ord[,1] - parms.ord[,5])
+round(cbind(parms.ord[,1], ci.parms), digits = 3)
+round(exp(cbind(OR = parms.ord[,1], ci.parms))[-1,], digits = 2)
+```
+
+```{r}
+best.fit <- glm(good ~ distance + PAT, data = placekick, family = binomial(link = "logit"))
+round(summary(best.fit)$coefficients, 2)
+```
+
+#5.2 Tools to Assesss Model Fit
+```{r}
+w <- aggregate(good ~ distance, data = placekick, FUN = sum)
+n <- aggregate(good ~ distance, data = placekick, FUN = length)
+w.n <- data.frame(distance = w$distance, success = w$good, trials = n$good, proportion = round(w$good/n$good, 4))
+head(w.n)
+```
+
+```{r}
+y <- 0.3
+n <- 3
+pi.hat <- 0.9
+e <- round((y - n*pi.hat)/sqrt(n*pi.hat*(1-pi.hat)), 2)
+prob.norm <- round(pnorm(q = e), 4)
+prob.bin <- round(pbinom(q = y, size = n, prob = pi.hat), 4)
+data.frame(y, e, prob.norm, prob.bin)
+```
+
+```{r}
+mod.fit.bin <- glm(success/trails ~ distance, weights = trails, family = binomial(link = logit), data = w.n)
+pi.hat <- predict(mod.fit.bin, type = "response")
+p.res <- residuals(mod.fit.bin, type = "pearson")
+s.res <- rstandard(mod.fit.bin, type = "pearson")
+lin.pred <- mod.fit.bin$linear.predictors
+w.n <- data.frame(w.n, pi.hat, p.res, s.res, lin.pred)
+round(head(w.n), digits = 3)
+```
+
+```{r}
+plot(x = w.n$distance, y = w.n$s.res, xlab = "Distance", ylab = "Standardized Pearson residuals", main = "Standardized residuals vs. X")
+abline(h = c(3, 2, 0, -2, -3), lty = 3, col = "blue")
+smooth.stand <- loess(s.res ~ distance, data = w.n, weights = trials)
+order.dist <- order(w.n$distance)
+lines(x = w.n$distance[order.dist], y = predict(smooth.stand)[order.dist], lty = 3, col = "red", lwd = 3)
+```
+
+```{r}
+1 - pbinom(q = 775, size = 789, prob = 0.971)
+```
+
+# 5.3 Overdispersion
+```{r}
+groups <- ifelse(test = crab$width<23.25, yes = 1, no = ifelse(test = crab$width<24.25, yes = 2, no =ifelse(test = crab$width<25.25, yes = 3, no =ifelse(test = crab$width<26.25, yes = 4, no =ifelse(test = crab$width<27.25, yes = 5, no =ifelse(test = crab$width<28.25, yes = 6, no =ifelse(test = crab$width<29.25, yes = 7, no = 8)))))))
+crab.group <- data.frame(crab, groups)
+head(crab.group)
+```
+
+```{r}
+ybar <- aggregate(formula = satellite ~ groups, data = crab, FUN = mean)
+var.y <- aggregate(satellite ~ groups, data = crab, FUN = var)
+group.name <- c("width <23.25", "23.25 <= width < 24.25", "24.25 <= width < 25.25", "25.25 <= width < 26.25", "26.25 <= width < 27.25", "27.25 <= width < 28.25", "28.25 <= width < 29.25", "29.25 <= width < 30.25")
+data.frame(group.name, mean.sat = round(ybar$satellite, 2), var.sat = round(var.y$satellite, 2))
+```
+
+```{r}
+mod.fit <- glm(satellite ~ width, data = crab, family = poisson(link = log))
+summary(mod.fit)
+```
+
+```{r}
+mod.fit$deviance / mod.fit$df.residual
+
+round(c(1 + 2*sqrt(2/mod.fit$df.residual), 1 + 3*sqrt(2/mod.fit$df.residual)), 2)
+```
+
+```{r}
+mu.hat <- mod.fit$fitted.values
+stand.resid <- rstandard(model = mod.fit, type = "pearson")
+plot(x = mu.hat, y = stand.resid, xlab = expression(hat(mu)), ylab = "Standard Pearson Residuals", ylim = c(min(c(-3, stand.resid)), max(c(3, stand.resid))))
+abline(h = c(-3, -2, 0, 2, 3), lty = "dotted", col = "red")
+```
+
+```{r}
+sum(abs(stand.resid) > 3)
+length(stand.resid)
+sum(abs(stand.resid) > 3) / length(stand.resid)
+length(stand.resid)*2*(1 - pnorm(q = 3))
+```
+
+```{r}
+mod.fit.quasi <- glm(satellite ~ width, data = crab, family = quasipoisson(link = log))
+summary(mod.fit.quasi)
+```
+
+```{r}
+sum.fit.quasi <- summary(mod.fit.quasi)
+vcov(mod.fit.quasi)
+vcov(mod.fit) * sum.fit.quasi$dispersion
+```
+
+```{r}
+anova(mod.fit.quasi, test = "F")
+Anova(mod.fit.quasi, test.statistic = "F")
+```
+
+```{r}
+beta.ci <- confint.default(object = mod.fit.quasi, parm = "width", level = 0.95)
+beta.ci
+100*(exp(beta.ci) - 1)
+```
+
+```{r}
+beta.ci <- confint(object = mod.fit.quasi, parm = "width", level = 0.95)
+beta.ci
+100*(exp(beta.ci)- 1)
+```
+
+```{r}
+mod.fit.nb <- glm.nb(satellite ~ width, data = crab, link = log)
+summary(mod.fit.nb)
+class(mod.fit.nb)
+```
+
+```{r}
+vcov(mod.fit.nb)
+vcov(mod.fit.quasi)
+vcov(mod.fit)
+```
+
+```{r}
+sum.fit.nb <- summary(mod.fit.nb)
+sum.fit <- summary(mod.fit)
+std.err <- data.frame(Poisson = sum.fit$coefficients[,2], quasi = sum.fit.quasi$coefficients[,2], nb = sum.fit.nb$coefficients[,2])
+std.err
+```
+
+```{r}
+nb23 <- ci.mu(newdata = data.frame(width = 23), mod.fit.obj = mod.fit.nb, alpha = 0.05)
+quasi23 <- ci.mu(newdata = data.frame(width = 23), mod.fit.obj = mod.fit.quasi, alpha = 0.05)
+Pois23 <- ci.mu(newdata = data.frame(width = 23), mod.fit.obj = mod.fit, alpha = 0.05)
+data.frame(type = c("Negative binomial", "Quasi-Poisson", "Poisson"), lower = round(c(nb23$lower, quasi23$lower, Pois23$lower), 2), upper = round(c(nb23$upper, quasi23$upper, Pois23$upper), 2))
+```
+
+```{r}
+nb33 <- ci.mu(newdata = data.frame(width = 33), mod.fit.obj = mod.fit.nb, alpha = 0.05)
+quasi33 <- ci.mu(newdata = data.frame(width = 33), mod.fit.obj = mod.fit.quasi, alpha = 0.05)
+Pois33 <- ci.mu(newdata = data.frame(width = 33), mod.fit.obj = mod.fit, alpha = 0.05)
+data.frame(type = c("Negative binomial", "Quasi-Poisson", "Poisson"), lower = round(c(nb33$lower, quasi33$lower, Pois33$lower), 2), upper = round(c(nb33$upper, quasi33$upper, Pois33$upper), 2))
+```
+
+```{r}
+set1 <- data.frame(res.sq = residuals(object = mod.fit, type = "response")^2, mu.hat = mod.fit$fitted.values)
+fit.lin <- lm(res.sq ~ mu.hat, data = set1)
+fit.quad <- lm(res.sq ~ mu.hat + I(mu.hat^2), data = set1)
+summary(fit.quad)
+```
+
+```{r}
+plot(z = set1$mu.hat, y = set1$res.sq, xlab = expression(hat(mu)), ylab = "Squared Residual")
+curve(expr = predict(object = fit.lin, newdata = data.frame(mu.hat = x), type = "response"), col = "blue", add = TRUE, lty = "solid")
+curve(expr = predict(object = fit.quad, newdata = data.frame(mu.hat = x), type = "response"), col = "red", add = TRUE, lty = "solid")
+legend(x = 50, y =1000, legend = c("Linear", "Quadratic"), col = c("red", "blue"), lty = c("solid", "dashed"), bty = "n")
+```
